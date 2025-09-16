@@ -1,82 +1,50 @@
 #!/usr/bin/env python3
 import rclpy
 from rclpy.node import Node
-from std_msgs.msg import Float64  # Usaremos Float64 para os valores com casas decimais
-import json # Importa a biblioteca para trabalhar com JSON
+from std_msgs.msg import Bool
+import json
 
 class ProcessamentoNode(Node):
     def __init__(self):
         super().__init__('processamento_node')
 
-        # 1. Armazene o JSON que você vai receber cSSomo uma string.
-        #    Na prática, você receberia isso de um socket, arquivo, etc.
-        self.json_data_string = """
-        {
-            "finger_distances": {
-                "LeftHand": {
-                    "Thumb": 56.97,
-                    "Index": 100.0,
-                    "Ring": 63.33,
-                    "Pinky": 59.47,
-                    "Middle": 64.61
-                },
-                "RightHand": {
-                    "Thumb": 53.92,
-                    "Middle": 36.16,
-                    "Ring": 29.07,
-                    "Pinky": 28.08,
-                    "Index": 34.93
-                }
-            }
+        # Caminho do arquivo JSON
+        self.json_file_path = '/home/vitor-lucas-fujita-fel-cio/Documents/recebido.json'
+
+        # Crie os publishers para cada mão
+        self.publishers_ = {
+            'righthand': self.create_publisher(Bool, 'hand_status/righthand', 10),
+            'lefthand': self.create_publisher(Bool, 'hand_status/lefthand', 10)
         }
+
+        # Timer para ler o arquivo periodicamente
+        timer_period = 0.1  # 100ms para leitura mais frequente
+        self.timer = self.create_timer(timer_period, self.publish_hand_status)
+        self.get_logger().info('Processamento Node iniciado. Monitorando status das mãos...')
+
+    def read_json_file(self):
+        try:
+            with open(self.json_file_path, 'r') as file:
+                return json.load(file)
+        except Exception as e:
+            self.get_logger().error(f'Erro ao ler arquivo JSON: {str(e)}')
+            return None
+
+    def publish_hand_status(self):
         """
-
-        # 2. Crie um dicionário para guardar todos os seus publishers
-        self.publishers_ = {}
-        
-        # Converte o JSON em um dicionário Python para configurar os tópicos
-        dados = json.loads(self.json_data_string)
-        
-        # 3. Itere sobre os dados para criar um publisher para cada dedo
-        for hand, fingers in dados['finger_distances'].items():
-            for finger, _ in fingers.items():
-                # Cria um nome de tópico dinâmico, ex: /finger_distances/lefthand/thumb
-                topic_name = f'finger_distances/{hand.lower()}/{finger.lower()}'
-                
-                # Cria o publisher e o armazena no dicionário
-                self.publishers_[topic_name] = self.create_publisher(Float64, topic_name, 10)
-                self.get_logger().info(f'Tópico criado: "{topic_name}"')
-
-        # 4. Crie um timer para chamar a função de publicação periodicamente
-        timer_period = 1.0  # segundos
-        self.timer = self.create_timer(timer_period, self.publish_distances)
-        self.get_logger().info('Processamento Node iniciado. Publicando distâncias dos dedos...')
-
-    def publish_distances(self):
+        Lê o arquivo JSON e publica o status de cada mão
         """
-        Esta função é chamada pelo timer. Ela lê o JSON,
-        e publica cada valor no seu tópico correspondente.
-        """
-        # Converte a string JSON para um dicionário Python
-        dados = json.loads(self.json_data_string)
-
-        # Itera pelos dados e publica cada um
-        for hand, fingers in dados['finger_distances'].items():
-            for finger, distance in fingers.items():
-                topic_name = f'finger_distances/{hand.lower()}/{finger.lower()}'
-                
-                # Prepara a mensagem do tipo Float64
-                msg = Float64()
-                msg.data = float(distance) # Garante que o dado é um float
-                
-                # Publica a mensagem no tópico correto
-                self.publishers_[topic_name].publish(msg)
-                
-                # Log para sabermos o que está sendo publicado
-                self.get_logger().info(f'Publicando em "{topic_name}": {msg.data}')
+        dados = self.read_json_file()
         
-        self.get_logger().info('--- Ciclo de publicação completo ---')
-
+        if dados is None:
+            return
+            
+        # Publica o status de cada mão
+        for hand, status in dados.items():
+            msg = Bool()
+            msg.data = status
+            self.publishers_[hand].publish(msg)
+            self.get_logger().info(f'Publicando status da {hand}: {status}')
 
 def main(args=None):
     rclpy.init(args=args)
