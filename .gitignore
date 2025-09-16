@@ -1,0 +1,26 @@
+# ROS 2 Build Artifacts
+build/
+install/
+log/
+
+# Python specific
+**/_pycache_/
+*.pyc
+
+# Compiled files
+*.so
+*.dll
+*.dylib
+*.o
+
+# CMake generated files
+*.cmake
+
+# IDE/Editor specific
+.vscode/
+.idea/
+*~
+#*#
+
+# Environment specific (adjust as needed)
+.env
