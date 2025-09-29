@@ -20,7 +20,6 @@ log/
 .vscode/
 .idea/
 *~
-#*#
 
 # Environment specific (adjust as needed)
 .env

@@ -1,26 +1,36 @@
 #!/usr/bin/env python3
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy, HistoryPolicy
 from std_msgs.msg import Bool
 import json
 
 class ProcessamentoNode(Node):
     def __init__(self):
         super().__init__('processamento_node')
-
+        self.get_logger().info('Processamento Node iniciado. Monitorando status das mãos...')
+        
         # Caminho do arquivo JSON
-        self.json_file_path = '/home/vitor-lucas-fujita-fel-cio/Documents/recebido.json'
+        # TODO: Atualize este caminho conforme necessário (utilize um caminho relativo ou parâmetro)
+        self.json_file_path = '/home/vitor-lucas-fujita-fel-cio/Documents/recebido.json' #! troque para " "
+
+        # Configuração QoS (Quality of Service)
+        # reliability: BEST_EFFORT para minimizar latência
+        # durability: VOLATILE para não armazenar mensagens antigas
+        qos_profile = QoSProfile(
+            reliability=ReliabilityPolicy.RELIABLE,         # garante entrega (é estado, não sensor)
+            durability=DurabilityPolicy.TRANSIENT_LOCAL,    # guarda o último valor (latched)
+            history=HistoryPolicy.KEEP_LAST,
+            depth=1
+        )
 
         # Crie os publishers para cada mão
         self.publishers_ = {
-            'righthand': self.create_publisher(Bool, 'hand_status/righthand', 10),
-            'lefthand': self.create_publisher(Bool, 'hand_status/lefthand', 10)
+            'righthand': self.create_publisher(Bool, "/right/hand_joint", qos_profile),
+            'lefthand': self.create_publisher(Bool, "/left/hand_joint", qos_profile)
         }
 
-        # Timer para ler o arquivo periodicamente
-        timer_period = 0.1  # 100ms para leitura mais frequente
-        self.timer = self.create_timer(timer_period, self.publish_hand_status)
-        self.get_logger().info('Processamento Node iniciado. Monitorando status das mãos...')
+        self.timer = self.create_timer(0.1, self.publish_hand_status)
 
     def read_json_file(self):
         try:
