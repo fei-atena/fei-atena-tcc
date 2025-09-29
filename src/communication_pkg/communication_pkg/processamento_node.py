@@ -12,7 +12,7 @@ class ProcessamentoNode(Node):
         
         # Caminho do arquivo JSON
         # TODO: Atualize este caminho conforme necessário (utilize um caminho relativo ou parâmetro)
-        self.json_file_path = '/home/vitor-lucas-fujita-fel-cio/Documents/recebido.json' #! troque para " "
+        self.json_file_path = '/home/atena/fei-atena-tcc/recebido.json'
 
         # Configuração QoS (Quality of Service)
         # reliability: BEST_EFFORT para minimizar latência
