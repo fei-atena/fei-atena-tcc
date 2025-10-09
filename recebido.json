@@ -1,4 +1,92 @@
 {
-  "righthand": false,
-  "lefthand": false
+  "current_frame": {
+    "body": {
+      "is_tracked": true,
+      "timestamp": 1759965868053865000,
+      "body_list": [
+        {
+          "id": 0,
+          "confidence": 93.39836883544922,
+          "local_orientation_euler_deg": {
+            "ShoulderLeft": {
+              "roll": -5.354141065289934,
+              "pitch": -12.767928544444391,
+              "yaw": 105.51957028079381
+            },
+            "ElbowLeft": {
+              "roll": 0.0,
+              "pitch": -19.928023374106367,
+              "yaw": 0.0
+            },
+            "ShoulderRight": {
+              "roll": -4.060130557414059,
+              "pitch": -3.750265325856446,
+              "yaw": -52.33598108149864
+            },
+            "ElbowRight": {
+              "roll": 0.0,
+              "pitch": 22.426136242495375,
+              "yaw": 0.0
+            }
+          }
+        },
+        {
+          "id": 1,
+          "confidence": 71.67575073242188,
+          "local_orientation_euler_deg": {
+            "ShoulderLeft": {
+              "roll": -0.7510446914262627,
+              "pitch": 6.454556991381909,
+              "yaw": 86.64759824446368
+            },
+            "ElbowLeft": {
+              "roll": 0.0,
+              "pitch": -22.717408616301164,
+              "yaw": 0.0
+            },
+            "ShoulderRight": {
+              "roll": -177.18825528664877,
+              "pitch": 81.00477433082392,
+              "yaw": 100.23834763302824
+            },
+            "ElbowRight": {
+              "roll": 180.0,
+              "pitch": 63.17859842125667,
+              "yaw": 180.0
+            }
+          }
+        },
+        {
+          "id": 4,
+          "confidence": 76.83425903320312,
+          "local_orientation_euler_deg": {
+            "ShoulderLeft": {
+              "roll": -16.770858477128737,
+              "pitch": -24.54797862277757,
+              "yaw": 123.38984515115014
+            },
+            "ElbowLeft": {
+              "roll": 0.0,
+              "pitch": -35.38394542089626,
+              "yaw": 0.0
+            },
+            "ShoulderRight": {
+              "roll": -2.6019073095403207,
+              "pitch": 19.37010586813739,
+              "yaw": -104.50296677741366
+            },
+            "ElbowRight": {
+              "roll": 0.0,
+              "pitch": 32.63460803886888,
+              "yaw": 0.0
+            }
+          }
+        }
+      ]
+    },
+    "hands": {
+      "left_hand_open": false,
+      "right_hand_open": false
+    }
+  }
 }
