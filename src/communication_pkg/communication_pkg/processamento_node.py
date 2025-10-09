@@ -11,7 +11,7 @@ class ProcessamentoNode(Node):
         self.get_logger().info('Processamento Node iniciado. Monitorando status das mãos e ângulos...')
         
         # Caminho do arquivo JSON
-        self.json_file_path = '/home/vitor-lucas-fujita-fel-cio/Documents/recebido.json'
+        self.json_file_path = '/home/atena/fei-atena-tcc/recebido.json'
 
         # Configuração QoS
         qos_profile = QoSProfile(
