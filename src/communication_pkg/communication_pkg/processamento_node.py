@@ -4,6 +4,7 @@ from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy, HistoryPolicy
 from std_msgs.msg import Bool, Int32
 import json
+from tf_transformations import euler_from_quaternion
 
 class ProcessamentoNode(Node):
     def __init__(self):
@@ -81,6 +82,26 @@ class ProcessamentoNode(Node):
             }
         }
 
+        # Centralized configuration for servo motor limits
+        self.servo_limits = {
+            'ShoulderLeft': {
+                'roll': {'min': 0, 'max': 180},
+                'pitch': {'min': 0, 'max': 110},
+                'yaw': {'min': 0, 'max': 90}
+            },
+            'ElbowLeft': {
+                'pitch': {'min': 0, 'max': 80}
+            },
+            'ShoulderRight': {
+                'roll': {'min': 0, 'max': 180},
+                'pitch': {'min': 0, 'max': 110},
+                'yaw': {'min': 0, 'max': 90}
+            },
+            'ElbowRight': {
+                'pitch': {'min': 0, 'max': 100}
+            }
+        }
+
         self.timer = self.create_timer(0.1, self.publish_status)
 
     def read_json_file(self):
@@ -125,6 +146,83 @@ class ProcessamentoNode(Node):
         out = out_min + t * (out_max - out_min)
         return int(round(out))
 
+    def quaternion_to_euler(self, ox, oy, oz, ow):
+        """Converte quaternion para ângulos de Euler (roll, pitch, yaw) em graus normalizados (0-360)."""
+        try:
+            orientation_list = [ox, oy, oz, ow]
+            roll, pitch, yaw = euler_from_quaternion(orientation_list)
+            # Convertendo de radianos para graus
+            roll = roll * (180.0 / 3.141592653589793)
+            pitch = pitch * (180.0 / 3.141592653589793)
+            yaw = yaw * (180.0 / 3.141592653589793)
+
+            # Normalizando para o intervalo 0-360 graus
+            roll = (roll + 360) % 360
+            pitch = (pitch + 360) % 360
+            yaw = (yaw + 360) % 360
+
+            self.get_logger().info(f'Quaternion convertido: ox={ox}, oy={oy}, oz={oz}, ow={ow} -> roll={roll}, pitch={pitch}, yaw={yaw}')
+            return roll, pitch, yaw
+        except Exception as e:
+            self.get_logger().error(f'Erro ao converter quaternion para Euler: {str(e)}')
+            return 0.0, 0.0, 0.0
+
+    def convert_all_quaternions_to_euler(self, orientations):
+        """Converte todos os quaternions para ângulos de Euler e retorna um dicionário."""
+        euler_data = {}
+        for joint_name, quaternion in orientations.items():
+            ox, oy, oz, ow = quaternion['ox'], quaternion['oy'], quaternion['oz'], quaternion['ow']
+            roll, pitch, yaw = self.quaternion_to_euler(ox, oy, oz, ow)
+            euler_data[joint_name] = {
+                'roll': roll,
+                'pitch': pitch,
+                'yaw': yaw
+            }
+        return euler_data
+
+    def save_complete_euler_payload(self, euler_data):
+        """Salva o payload completo de Euler em um arquivo JSON."""
+        try:
+            with open('/home/atena/fei-atena-tcc/euler.json', 'w') as file:
+                json.dump(euler_data, file, indent=4)
+        except Exception as e:
+            self.get_logger().error(f'Erro ao salvar euler.json: {str(e)}')
+
+    def apply_servo_limits(self, joint_name, angle_type, value):
+        """Aplica os limites definidos para os servos e retorna o valor ajustado."""
+        if joint_name in self.servo_limits and angle_type in self.servo_limits[joint_name]:
+            limits = self.servo_limits[joint_name][angle_type]
+            limited_value = max(limits['min'], min(limits['max'], value))
+            self.get_logger().info(
+                f'Aplicando limites: joint={joint_name}, angle_type={angle_type}, valor_original={value}, limitado={limited_value}')
+            return limited_value
+        else:
+            self.get_logger().warning(
+                f'Limites não definidos para joint={joint_name}, angle_type={angle_type}. Usando valor original: {value}')
+            return value
+
+    def process_joint_angles(self, joint_name, angles):
+        """Processa os ângulos das juntas, aplica limites e mapeia para os valores dos servos."""
+        servo_values = {}
+        for angle_type, value in angles.items():
+            limited_value = self.apply_servo_limits(joint_name, angle_type, value)
+            if joint_name in self.joint_mappings and angle_type in self.joint_mappings[joint_name]:
+                cfg = self.joint_mappings[joint_name][angle_type]
+                mapped_value = self.map_angle_to_servo(
+                    limited_value,
+                    cfg['in_min'], cfg['in_max'],
+                    cfg['out_min'], cfg['out_max'],
+                    cfg.get('invert', False)
+                )
+                self.get_logger().info(
+                    f'Mapeado para servo: joint={joint_name}, angle_type={angle_type}, entrada={limited_value}, mapeado={mapped_value}')
+                servo_values[angle_type] = mapped_value
+            else:
+                servo_values[angle_type] = self.normalize_angle(limited_value)
+                self.get_logger().info(
+                    f'Fallback mapping: joint={joint_name}, angle_type={angle_type}, entrada={limited_value}, mapeado={servo_values[angle_type]}')
+        return servo_values
+
     def publish_status(self):
         """Lê o arquivo JSON e publica todos os status"""
         try:
@@ -154,37 +252,21 @@ class ProcessamentoNode(Node):
                 len(dados['current_frame']['body']['body_list']) > 0):
                 
                 body_data = dados['current_frame']['body']['body_list'][0]
-                if 'local_orientation_euler_deg' in body_data:
-                    orientations = body_data['local_orientation_euler_deg']
-                    
-                    for joint_name, angles in orientations.items():
+                if 'local_orientation_quat' in body_data:
+                    orientations = body_data['local_orientation_quat']
+                    euler_data = self.convert_all_quaternions_to_euler(orientations)
+                    self.save_complete_euler_payload(euler_data)
+
+                    for joint_name, angles in euler_data.items():
                         if joint_name in self.joint_publishers:
-                            for angle_type, value in angles.items():
-                                angle_type = angle_type.lower()
+                            servo_values = self.process_joint_angles(joint_name, angles)
+                            for angle_type, mapped_value in servo_values.items():
                                 if angle_type in self.joint_publishers[joint_name]:
                                     msg = Int32()
-
-                                    # Se existir uma configuração de mapeamento para essa junta/ângulo,
-                                    # use-a; caso contrário, caia no comportamento legacy (0-180).
-                                    if (joint_name in self.joint_mappings and
-                                            angle_type in self.joint_mappings[joint_name]):
-                                        cfg = self.joint_mappings[joint_name][angle_type]
-                                        mapped = self.map_angle_to_servo(
-                                            value,
-                                            cfg['in_min'], cfg['in_max'],
-                                            cfg['out_min'], cfg['out_max'],
-                                            cfg.get('invert', False)
-                                        )
-                                        msg.data = mapped
-                                        self.get_logger().info(
-                                            f'Mapeado {joint_name} {angle_type}: entrada={value} -> servo={msg.data}')
-                                    else:
-                                        # fallback genérico
-                                        msg.data = self.normalize_angle(value)
-                                        self.get_logger().info(f'Publicando (fallback) {joint_name} {angle_type}: {msg.data}')
-
+                                    msg.data = mapped_value
                                     self.joint_publishers[joint_name][angle_type].publish(msg)
-
+                                    self.get_logger().info(
+                                        f'Publicado: joint={joint_name}, angle_type={angle_type}, valor_servo={mapped_value}')
         except Exception as e:
             self.get_logger().error(f'Erro ao processar dados: {str(e)}')
 

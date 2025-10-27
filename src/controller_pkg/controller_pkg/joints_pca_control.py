@@ -26,14 +26,14 @@ class JointsPCAControl(Node):
         # PCA/ServoKit
         self.kit = ServoKit(channels=16)
         # Mapear canais (ajuste conforme sua fiação)
-        self.SHOULDER_LEFT_YAW_CH = 0
+        self.SHOULDER_LEFT_ROLL_CH = 0
         self.SHOULDER_LEFT_PITCH_CH = 1
-        self.SHOULDER_LEFT_ROLL_CH = 2
+        self.SHOULDER_LEFT_YAW_CH = 2
         self.ELBOW_LEFT_PITCH_CH = 3
 
-        self.SHOULDER_RIGHT_PITCH_CH = 4
-        self.SHOULDER_RIGHT_YAW_CH = 5
-        self.SHOULDER_RIGHT_ROLL_CH = 6
+        self.SHOULDER_RIGHT_ROLL_CH = 4
+        self.SHOULDER_RIGHT_PITCH_CH = 5
+        self.SHOULDER_RIGHT_YAW_CH = 6
         self.ELBOW_RIGHT_PITCH_CH = 7
 
         # QoS
