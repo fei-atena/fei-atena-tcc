@@ -61,10 +61,23 @@ class ProcessamentoNode(Node):
         self.joint_mappings = {
             'ShoulderLeft': {
                 'yaw':    {'in_min': -90.0, 'in_max': 180.0, 'out_min': 0,   'out_max': 90,  'invert': False},
-                # pitch: forward lift in the source is negative (~-60..-80). We map input
-                # roughly from [-90 .. 30] -> [0 .. 110] so large negative pitch sends servo high.
                 'pitch':  {'in_min': -90.0, 'in_max': 30.0,  'out_min': 0,   'out_max': 110, 'invert': True},
-                # note: no roll mapping because hardware não tem servo para roll no ombro
+                'roll':   {'in_min': -180.0, 'in_max': 180.0, 'out_min': 0,   'out_max': 180, 'invert': False}
+            },
+            'ElbowLeft': {
+                'pitch': {
+                    'in_min': -90.0, 'in_max': 0.0, 'out_min': 0, 'out_max': 80, 'invert': False
+                }
+            },
+            'ShoulderRight': {
+                'yaw':    {'in_min': -90.0, 'in_max': 180.0, 'out_min': 0,   'out_max': 90,  'invert': False},
+                'pitch':  {'in_min': -90.0, 'in_max': 30.0,  'out_min': 0,   'out_max': 110, 'invert': True},
+                'roll':   {'in_min': -180.0, 'in_max': 180.0, 'out_min': 0,   'out_max': 180, 'invert': False}
+            },
+            'ElbowRight': {
+                'pitch': {
+                    'in_min': -90.0, 'in_max': 0.0, 'out_min': 0, 'out_max': 100, 'invert': False
+                }
             }
         }
 

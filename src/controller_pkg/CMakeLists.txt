@@ -18,6 +18,7 @@ ament_python_install_package(${PROJECT_NAME})
 install(PROGRAMS
   ${PROJECT_NAME}/hand_controller.py
   ${PROJECT_NAME}/pca_hand_controller.py
+  ${PROJECT_NAME}/joints_pca_control.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
