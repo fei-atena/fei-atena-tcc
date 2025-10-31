@@ -2,149 +2,97 @@
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy, HistoryPolicy
-from std_msgs.msg import Int32
+from std_msgs.msg import Int32, Bool
 from adafruit_servokit import ServoKit
-
-"""
-Node para controlar servos via PCA9685 (ServoKit). Subscreve aos tópicos publicados
-por `processamento_node.py` e posiciona os servos correspondentes.
-
-Assunções/Configuração inicial (ajustar se necessário):
-- ShoulderLeft yaw -> canal 0 (range servo: 0..90)
-- ShoulderLeft pitch -> canal 2 (range servo: 0..110)
-- Left/Right hand -> canais opcionais (definir conforme sua placa)
-
-Implementação: callbacks recebem Int32 (0-180 ou valores mapeados pelo processamento)
-e definem o ângulo do servo com clamp em [0, 180].
-"""
-
 
 class JointsPCAControl(Node):
     def __init__(self):
         super().__init__('joints_pca_control')
 
-        # PCA/ServoKit
+        # PCA9685
         self.kit = ServoKit(channels=16)
-        # Mapear canais (ajuste conforme sua fiação)
-        self.SHOULDER_LEFT_ROLL_CH = 0
-        self.SHOULDER_LEFT_PITCH_CH = 1
-        self.SHOULDER_LEFT_YAW_CH = 2
-        self.ELBOW_LEFT_PITCH_CH = 3
 
-        self.SHOULDER_RIGHT_ROLL_CH = 4
-        self.SHOULDER_RIGHT_PITCH_CH = 5
-        self.SHOULDER_RIGHT_YAW_CH = 6
-        self.ELBOW_RIGHT_PITCH_CH = 7
+        # Mapeie cada ação a um canal
+        # AJUSTE AQUI conforme a montagem eletrônica:
+        self.ch = {
+            'left': {
+                'shoulder_abd':   0,
+                'shoulder_flex':  1,
+                'shoulder_rot':   2,
+                'elbow_flex':     3,
+            },
+            'right': {
+                'shoulder_abd':   4,
+                'shoulder_flex':  5,
+                'shoulder_rot':   6,
+                'elbow_flex':     7,
+            }
+        }
+        self.hand_ch = {'left': 8, 'right': 9}  # se tiver servo da mão num canal dedicado
 
-        # QoS
-        qos_profile = QoSProfile(
+        # Limites físicos de ângulo enviados ao ServoKit (proteção)
+        self.servo_min, self.servo_max = 0, 110
+
+        qos = QoSProfile(
             reliability=ReliabilityPolicy.RELIABLE,
             durability=DurabilityPolicy.TRANSIENT_LOCAL,
             history=HistoryPolicy.KEEP_LAST,
             depth=1
         )
 
-        # Subscriptions: os tópicos devem existir no processamento_node.py
-        self.create_subscription(Int32, '/left/shoulder_pitch', self.left_shoulder_pitch_cb, qos_profile)
-        self.create_subscription(Int32, '/left/shoulder_yaw',   self.left_shoulder_yaw_cb,   qos_profile)
-        # Subscriptions para os cotovelos
-        self.create_subscription(Int32, '/left/elbow_pitch', self.left_elbow_pitch_cb, qos_profile)
-        self.create_subscription(Int32, '/right/elbow_pitch', self.right_elbow_pitch_cb, qos_profile)
-        # Subscriptions para os ombros (incluindo roll)
-        self.create_subscription(Int32, '/left/shoulder_roll', self.left_shoulder_roll_cb, qos_profile)
-        self.create_subscription(Int32, '/right/shoulder_pitch', self.right_shoulder_pitch_cb, qos_profile)
-        self.create_subscription(Int32, '/right/shoulder_yaw', self.right_shoulder_yaw_cb, qos_profile)
-        self.create_subscription(Int32, '/right/shoulder_roll', self.right_shoulder_roll_cb, qos_profile)
+        # Subscriptions lado ESQUERDO
+        self.create_subscription(Int32, '/left/shoulder_flex', self.mk_cb('left','shoulder_flex'), qos)
+        self.create_subscription(Int32, '/left/shoulder_abd',  self.mk_cb('left','shoulder_abd'),  qos)
+        self.create_subscription(Int32, '/left/shoulder_rot',  self.mk_cb('left','shoulder_rot'),  qos)
+        self.create_subscription(Int32, '/left/elbow_flex',    self.mk_cb('left','elbow_flex'),    qos)
+        self.create_subscription(Bool,  '/left/hand_open',     self.mk_hand_cb('left'),            qos)
 
-        # inicializar servos em posição segura (0)
+        # Subscriptions lado DIREITO
+        self.create_subscription(Int32, '/right/shoulder_flex', self.mk_cb('right','shoulder_flex'), qos)
+        self.create_subscription(Int32, '/right/shoulder_abd',  self.mk_cb('right','shoulder_abd'),  qos)
+        self.create_subscription(Int32, '/right/shoulder_rot',  self.mk_cb('right','shoulder_rot'),  qos)
+        self.create_subscription(Int32, '/right/elbow_flex',    self.mk_cb('right','elbow_flex'),    qos)
+        self.create_subscription(Bool,  '/right/hand_open',     self.mk_hand_cb('right'),            qos)
+
         self.initialize_servos()
-
-        self.get_logger().info('Joints PCA Control iniciado.')
+        self.get_logger().info('JointsPCAControl ouvindo tópicos anatômicos.')
 
     def initialize_servos(self):
-        # Inicializa apenas os canais que vamos controlar
-        for ch in (self.SHOULDER_LEFT_YAW_CH, self.SHOULDER_LEFT_PITCH_CH, self.SHOULDER_LEFT_ROLL_CH,
-                   self.SHOULDER_RIGHT_PITCH_CH, self.SHOULDER_RIGHT_YAW_CH, self.SHOULDER_RIGHT_ROLL_CH,
-                   self.ELBOW_LEFT_PITCH_CH, self.ELBOW_RIGHT_PITCH_CH):
-            try:
-                # Se canal não suportar ângulo, ignore
-                self.kit.servo[ch].angle = 0
-            except Exception:
-                # log e continuar
-                self.get_logger().debug(f'Não foi possível inicializar servo no canal {ch} (pode não estar conectado)')
+        for side in self.ch:
+            for action, channel in self.ch[side].items():
+                self.safe_set(channel, 0)
+        for side, channel in self.hand_ch.items():
+            self.safe_set(channel, 0)
 
-    def clamp_angle(self, angle: int) -> int:
+    def clamp(self, a):
         try:
-            a = int(angle)
+            a = int(a)
         except Exception:
-            return 0
-        return max(0, min(180, a))
+            a = 0
+        return max(self.servo_min, min(self.servo_max, a))
 
-    def left_shoulder_pitch_cb(self, msg: Int32):
-        angle = self.clamp_angle(msg.data)
-        # pitch servo tem faixa física menor (0..110) mas ServoKit aceita 0..180; mantenha clamp
+    def safe_set(self, channel, angle):
+        angle = self.clamp(angle)
         try:
-            self.kit.servo[self.SHOULDER_LEFT_PITCH_CH].angle = angle
-            self.get_logger().info(f'Set left shoulder pitch (ch {self.SHOULDER_LEFT_PITCH_CH}) = {angle}')
+            self.kit.servo[channel].angle = angle
         except Exception as e:
-            self.get_logger().error(f'Erro ao definir pitch: {e}')
+            self.get_logger().error(f'Falha no canal {channel}: {e}')
 
-    def left_shoulder_yaw_cb(self, msg: Int32):
-        angle = self.clamp_angle(msg.data)
-        try:
-            self.kit.servo[self.SHOULDER_LEFT_YAW_CH].angle = angle
-            self.get_logger().info(f'Set left shoulder yaw (ch {self.SHOULDER_LEFT_YAW_CH}) = {angle}')
-        except Exception as e:
-            self.get_logger().error(f'Erro ao definir yaw: {e}')
+    def mk_cb(self, side, action):
+        channel = self.ch[side][action]
+        def _cb(msg: Int32):
+            self.safe_set(channel, msg.data)
+            self.get_logger().info(f'{side}.{action} → ch{channel} = {self.clamp(msg.data)}')
+        return _cb
 
-    def left_elbow_pitch_cb(self, msg: Int32):
-        angle = self.clamp_angle(msg.data)
-        try:
-            self.kit.servo[self.ELBOW_LEFT_PITCH_CH].angle = angle
-            self.get_logger().info(f'Set left elbow pitch (ch {self.ELBOW_LEFT_PITCH_CH}) = {angle}')
-        except Exception as e:
-            self.get_logger().error(f'Erro ao definir pitch do cotovelo esquerdo: {e}')
-
-    def right_elbow_pitch_cb(self, msg: Int32):
-        angle = self.clamp_angle(msg.data)
-        try:
-            self.kit.servo[self.ELBOW_RIGHT_PITCH_CH].angle = angle
-            self.get_logger().info(f'Set right elbow pitch (ch {self.ELBOW_RIGHT_PITCH_CH}) = {angle}')
-        except Exception as e:
-            self.get_logger().error(f'Erro ao definir pitch do cotovelo direito: {e}')
-
-    def left_shoulder_roll_cb(self, msg: Int32):
-        angle = self.clamp_angle(msg.data)
-        try:
-            self.kit.servo[self.SHOULDER_LEFT_ROLL_CH].angle = angle
-            self.get_logger().info(f'Set left shoulder roll (ch {self.SHOULDER_LEFT_ROLL_CH}) = {angle}')
-        except Exception as e:
-            self.get_logger().error(f'Erro ao definir roll do ombro esquerdo: {e}')
-
-    def right_shoulder_pitch_cb(self, msg: Int32):
-        angle = self.clamp_angle(msg.data)
-        try:
-            self.kit.servo[self.SHOULDER_RIGHT_PITCH_CH].angle = angle
-            self.get_logger().info(f'Set right shoulder pitch (ch {self.SHOULDER_RIGHT_PITCH_CH}) = {angle}')
-        except Exception as e:
-            self.get_logger().error(f'Erro ao definir pitch do ombro direito: {e}')
-
-    def right_shoulder_yaw_cb(self, msg: Int32):
-        angle = self.clamp_angle(msg.data)
-        try:
-            self.kit.servo[self.SHOULDER_RIGHT_YAW_CH].angle = angle
-            self.get_logger().info(f'Set right shoulder yaw (ch {self.SHOULDER_RIGHT_YAW_CH}) = {angle}')
-        except Exception as e:
-            self.get_logger().error(f'Erro ao definir yaw do ombro direito: {e}')
-
-    def right_shoulder_roll_cb(self, msg: Int32):
-        angle = self.clamp_angle(msg.data)
-        try:
-            self.kit.servo[self.SHOULDER_RIGHT_ROLL_CH].angle = angle
-            self.get_logger().info(f'Set right shoulder roll (ch {self.SHOULDER_RIGHT_ROLL_CH}) = {angle}')
-        except Exception as e:
-            self.get_logger().error(f'Erro ao definir roll do ombro direito: {e}')
-
+    def mk_hand_cb(self, side):
+        channel = self.hand_ch[side]
+        def _cb(msg: Bool):
+            # Exemplo simples: aberto=110°, fechado=0°
+            target = 110 if msg.data else 0
+            self.safe_set(channel, target)
+            self.get_logger().info(f'{side}.hand_open={msg.data} → ch{channel} = {target}')
+        return _cb
 
 def main(args=None):
     rclpy.init(args=args)
@@ -154,7 +102,6 @@ def main(args=None):
     finally:
         node.destroy_node()
         rclpy.shutdown()
-
 
 if __name__ == '__main__':
     main()
