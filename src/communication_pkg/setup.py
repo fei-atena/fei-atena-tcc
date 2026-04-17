@@ -20,6 +20,8 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
+            'processamento_body38 = communication_pkg.body38_processamento_node:main',
+            'processamento_body34 = communication_pkg.body34_processamento_node:main',
             'processamento_node = communication_pkg.processamento_node:main',
         ],
     },

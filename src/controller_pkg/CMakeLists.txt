@@ -17,6 +17,7 @@ ament_python_install_package(${PROJECT_NAME})
 # Install Python executáveis
 install(PROGRAMS
   ${PROJECT_NAME}/hand_controller.py
+  ${PROJECT_NAME}/left_hand_controller.py
   ${PROJECT_NAME}/pca_hand_controller.py
   ${PROJECT_NAME}/joints_pca_control.py
   DESTINATION lib/${PROJECT_NAME}

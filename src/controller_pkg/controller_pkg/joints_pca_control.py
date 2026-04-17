@@ -1,37 +1,46 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy, HistoryPolicy
-from std_msgs.msg import Int32, Bool
+from std_msgs.msg import Int32
+
+# PCA9685
 from adafruit_servokit import ServoKit
+
+# ====== Frequência de atualização ======
+FLUSH_RATE_HZ = 20.0  # 20 Hz, atualiza SEMPRE
+
+# ====== Mapeamento de canais (ajuste conforme sua fiação) ======
+# left:  ch0=abd, ch1=flex, ch2=rot, ch3=elbow
+# right: ch4=abd, ch5=flex, ch6=rot, ch7=elbow
+CH_LEFT_SH_ABD   = 0
+CH_LEFT_SH_FLEX  = 1
+CH_LEFT_SH_ROT   = 2
+CH_LEFT_ELBOW    = 3
+
+CH_RIGHT_SH_ABD  = 4
+CH_RIGHT_SH_FLEX = 5
+CH_RIGHT_SH_ROT  = 6
+CH_RIGHT_ELBOW   = 7
+
+# ====== OFFSETS (graus, inteiros) ======
+# Ajuste fino de zero mecânico. Ex.: +3 deixa o servo 3° mais “aberto”.
+OFFSETS = {
+    'left_sh_abd':   0,
+    'left_sh_flex':  20,
+    'left_sh_rot':   0,
+    'left_elbow':    0,
+    'right_sh_abd':  10,
+    'right_sh_flex': 0,
+    'right_sh_rot':  0,
+    'right_elbow':   0,
+}
 
 class JointsPCAControl(Node):
     def __init__(self):
         super().__init__('joints_pca_control')
-
-        # PCA9685
-        self.kit = ServoKit(channels=16)
-
-        # Mapeie cada ação a um canal
-        # AJUSTE AQUI conforme a montagem eletrônica:
-        self.ch = {
-            'left': {
-                'shoulder_abd':   0,
-                'shoulder_flex':  1,
-                'shoulder_rot':   2,
-                'elbow_flex':     3,
-            },
-            'right': {
-                'shoulder_abd':   4,
-                'shoulder_flex':  5,
-                'shoulder_rot':   6,
-                'elbow_flex':     7,
-            }
-        }
-        self.hand_ch = {'left': 8, 'right': 9}  # se tiver servo da mão num canal dedicado
-
-        # Limites físicos de ângulo enviados ao ServoKit (proteção)
-        self.servo_min, self.servo_max = 0, 110
 
         qos = QoSProfile(
             reliability=ReliabilityPolicy.RELIABLE,
@@ -40,59 +49,77 @@ class JointsPCAControl(Node):
             depth=1
         )
 
-        # Subscriptions lado ESQUERDO
-        self.create_subscription(Int32, '/left/shoulder_flex', self.mk_cb('left','shoulder_flex'), qos)
-        self.create_subscription(Int32, '/left/shoulder_abd',  self.mk_cb('left','shoulder_abd'),  qos)
-        self.create_subscription(Int32, '/left/shoulder_rot',  self.mk_cb('left','shoulder_rot'),  qos)
-        self.create_subscription(Int32, '/left/elbow_flex',    self.mk_cb('left','elbow_flex'),    qos)
-        self.create_subscription(Bool,  '/left/hand_open',     self.mk_hand_cb('left'),            qos)
+        # ---- ServoKit / PCA9685 ----
+        self.kit = ServoKit(channels=16)
+        # Faixa de pulso padrão "hobby" (500–2500 µs) para os 8 canais usados
+        for ch in (CH_LEFT_SH_ABD, CH_LEFT_SH_FLEX, CH_LEFT_SH_ROT, CH_LEFT_ELBOW,
+                   CH_RIGHT_SH_ABD, CH_RIGHT_SH_FLEX, CH_RIGHT_SH_ROT, CH_RIGHT_ELBOW):
+            try:
+                self.kit.servo[ch].set_pulse_width_range(500, 2500)
+            except Exception as e:
+                self.get_logger().warning(f'PulseRange falhou no ch{ch}: {e}')
 
-        # Subscriptions lado DIREITO
-        self.create_subscription(Int32, '/right/shoulder_flex', self.mk_cb('right','shoulder_flex'), qos)
-        self.create_subscription(Int32, '/right/shoulder_abd',  self.mk_cb('right','shoulder_abd'),  qos)
-        self.create_subscription(Int32, '/right/shoulder_rot',  self.mk_cb('right','shoulder_rot'),  qos)
-        self.create_subscription(Int32, '/right/elbow_flex',    self.mk_cb('right','elbow_flex'),    qos)
-        self.create_subscription(Bool,  '/right/hand_open',     self.mk_hand_cb('right'),            qos)
+        # ---- Últimos comandos (graus, inteiros) ----
+        self.left_sh_abd   = 0
+        self.left_sh_flex  = 0
+        self.left_sh_rot   = 0
+        self.left_elbow    = 0
+        self.right_sh_abd  = 0
+        self.right_sh_flex = 0
+        self.right_sh_rot  = 0
+        self.right_elbow   = 0
 
-        self.initialize_servos()
-        self.get_logger().info('JointsPCAControl ouvindo tópicos anatômicos.')
+        # ---- Subscriptions: apenas guardam os valores recebidos ----
+        # ESQUERDO
+        self.create_subscription(Int32, '/left/shoulder_abd',   lambda m: self._set_left('abd',  m.data), qos)
+        self.create_subscription(Int32, '/left/shoulder_flex',  lambda m: self._set_left('flex', m.data), qos)
+        self.create_subscription(Int32, '/left/shoulder_rot',   lambda m: self._set_left('rot',  m.data), qos)
+        self.create_subscription(Int32, '/left/elbow_flex',     lambda m: self._set_left('elbow',m.data), qos)
+        # DIREITO
+        self.create_subscription(Int32, '/right/shoulder_abd',  lambda m: self._set_right('abd',  m.data), qos)
+        self.create_subscription(Int32, '/right/shoulder_flex', lambda m: self._set_right('flex', m.data), qos)
+        self.create_subscription(Int32, '/right/shoulder_rot',  lambda m: self._set_right('rot',  m.data), qos)
+        self.create_subscription(Int32, '/right/elbow_flex',    lambda m: self._set_right('elbow',m.data), qos)
 
-    def initialize_servos(self):
-        for side in self.ch:
-            for action, channel in self.ch[side].items():
-                self.safe_set(channel, 0)
-        for side, channel in self.hand_ch.items():
-            self.safe_set(channel, 0)
+        # ---- Timer: escreve TODOS os canais SEMPRE (sem for) ----
+        self.create_timer(1.0/FLUSH_RATE_HZ, self._flush)
 
-    def clamp(self, a):
+        self.get_logger().info('PCA control: offsets inteiros + flush síncrono 20 Hz (sem loop nem clamp).')
+
+    # ===== setters =====
+    def _as_int(self, v) -> int:
         try:
-            a = int(a)
+            return int(v)
         except Exception:
-            a = 0
-        return max(self.servo_min, min(self.servo_max, a))
+            return 0
 
-    def safe_set(self, channel, angle):
-        angle = self.clamp(angle)
-        try:
-            self.kit.servo[channel].angle = angle
-        except Exception as e:
-            self.get_logger().error(f'Falha no canal {channel}: {e}')
+    def _set_left(self, which: str, val):
+        a = self._as_int(val)
+        if   which == 'abd':   self.left_sh_abd  = a
+        elif which == 'flex':  self.left_sh_flex = a
+        elif which == 'rot':   self.left_sh_rot  = a
+        elif which == 'elbow': self.left_elbow   = a
 
-    def mk_cb(self, side, action):
-        channel = self.ch[side][action]
-        def _cb(msg: Int32):
-            self.safe_set(channel, msg.data)
-            self.get_logger().info(f'{side}.{action} → ch{channel} = {self.clamp(msg.data)}')
-        return _cb
+    def _set_right(self, which: str, val):
+        a = self._as_int(val)
+        if   which == 'abd':   self.right_sh_abd  = a
+        elif which == 'flex':  self.right_sh_flex = a
+        elif which == 'rot':   self.right_sh_rot  = a
+        elif which == 'elbow': self.right_elbow   = a
 
-    def mk_hand_cb(self, side):
-        channel = self.hand_ch[side]
-        def _cb(msg: Bool):
-            # Exemplo simples: aberto=110°, fechado=0°
-            target = 110 if msg.data else 0
-            self.safe_set(channel, target)
-            self.get_logger().info(f'{side}.hand_open={msg.data} → ch{channel} = {target}')
-        return _cb
+    # ===== flush: aplica offsets e envia ao PCA =====
+    def _flush(self):
+        # LEFT
+        self.kit.servo[CH_LEFT_SH_ABD].angle  = self.left_sh_abd  + OFFSETS['left_sh_abd']
+        self.kit.servo[CH_LEFT_SH_FLEX].angle = self.left_sh_flex + OFFSETS['left_sh_flex']
+        self.kit.servo[CH_LEFT_SH_ROT].angle  = self.left_sh_rot  + OFFSETS['left_sh_rot']
+        self.kit.servo[CH_LEFT_ELBOW].angle   = self.left_elbow   + OFFSETS['left_elbow']
+        # RIGHT
+        self.kit.servo[CH_RIGHT_SH_ABD].angle  = self.right_sh_abd  + OFFSETS['right_sh_abd']
+        self.kit.servo[CH_RIGHT_SH_FLEX].angle = self.right_sh_flex + OFFSETS['right_sh_flex']
+        self.kit.servo[CH_RIGHT_SH_ROT].angle  = self.right_sh_rot  + OFFSETS['right_sh_rot']
+        self.kit.servo[CH_RIGHT_ELBOW].angle   = self.right_elbow   + OFFSETS['right_elbow']
+
 
 def main(args=None):
     rclpy.init(args=args)
